@@ -335,8 +335,8 @@ private:
     typedef enum { LEFTCHANNEL=0, RIGHTCHANNEL=1 } SampleIndex;
     typedef enum { LOWSHELF = 0, PEAKEQ = 1, HIFGSHELF =2 } FilterType;
 
-    const uint8_t volumetable[22]={   0,  1,  2,  3,  4 , 6 , 8, 10, 12, 14, 17,
-                                     20, 23, 27, 30 ,34, 38, 43 ,48, 52, 58, 64}; //22 elements
+    const uint8_t volumetable[22]={   0,  1,  2,  3,  4 , 5 , 6, 10, 14, 20, 28,
+                                     37, 48, 60, 76 ,93, 113, 135, 161, 189, 220, 255}; //22 elements
 
     typedef struct _filter{
         float a0;
