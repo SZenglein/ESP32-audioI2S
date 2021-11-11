@@ -336,8 +336,9 @@ private:
     typedef enum { LEFTCHANNEL=0, RIGHTCHANNEL=1 } SampleIndex;
     typedef enum { LOWSHELF = 0, PEAKEQ = 1, HIFGSHELF =2 } FilterType;
 
-    const uint8_t volumetable[22]={   0,  1,  2,  3,  4 , 5 , 6, 10, 14, 20, 28,
-                                     37, 48, 60, 76 ,93, 113, 135, 161, 189, 220, 255}; //22 elements
+    // quadratic curve, close enough to exp
+    const uint16_t volumetable[22]={   0,  1,  2,  3,  7, 14, 24, 38, 57, 81, 111,
+                                     147, 191, 243, 303, 373, 453, 543, 645, 758, 885, 1024}; //22 elements
 
     typedef struct _filter{
         float a0;
@@ -372,7 +373,7 @@ private:
     int             m_metalen=0;                    // Number of bytes in metadata
     int             m_controlCounter = 0;           // Status within readID3data() and readWaveHeader()
     int8_t          m_balance = 0;                  // -16 (mute left) ... +16 (mute right)
-    uint8_t         m_vol=64;                       // volume
+    uint16_t        m_vol=64;                       // volume
     uint8_t         m_bitsPerSample = 16;           // bitsPerSample
     uint8_t         m_channels=2;
     uint8_t         m_i2s_num = I2S_NUM_0;          // I2S_NUM_0 or I2S_NUM_1
