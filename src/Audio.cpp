@@ -4243,8 +4243,8 @@ int32_t Audio::Gain(int16_t s[2]) {
         r = (uint8_t)(step);
     }
 
-    v[LEFTCHANNEL] = (s[LEFTCHANNEL]  * (m_vol - l)) >> 8;
-    v[RIGHTCHANNEL]= (s[RIGHTCHANNEL] * (m_vol - r)) >> 8;
+    v[LEFTCHANNEL] = (s[LEFTCHANNEL]  * (m_vol - l)) >> 10;
+    v[RIGHTCHANNEL]= (s[RIGHTCHANNEL] * (m_vol - r)) >> 10;
 
     return (v[RIGHTCHANNEL] << 16) | (v[LEFTCHANNEL] & 0xffff);
 }
