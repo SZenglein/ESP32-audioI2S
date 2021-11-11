@@ -1,3 +1,4 @@
+// the pin assignment matches the Olimex ADF board
 
 #include "Arduino.h"
 #include "WiFi.h"
@@ -64,7 +65,7 @@ void setup()
     Serial.print(" IP: ");
     Serial.println(WiFi.localIP());
 
-    Serial.printf("Connect to AC101 codec... ");
+    Serial.printf("Connect to ES8388 codec... ");
     while (not es.begin(IIC_DATA, IIC_CLK))
     {
         Serial.printf("Failed!\n");
