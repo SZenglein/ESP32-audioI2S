@@ -4232,19 +4232,21 @@ uint8_t Audio::getVolume() {
 int32_t Audio::Gain(int16_t s[2]) {
     int32_t v[2];
     float step = (float)m_vol / 1024;
-    uint8_t l = 0, r = 0;
+    uint16_t l = 0, r = 0;
 
     if(m_balance < 0){
-        step = step * (float)(abs(m_balance) * 4);
+        step = step * (float)(abs(m_balance) * 64);
         l = (uint8_t)(step);
     }
     if(m_balance > 0){
-        step = step * m_balance * 4;
+        step = step * (float) m_balance * 64;
         r = (uint8_t)(step);
     }
 
-    v[LEFTCHANNEL] = (s[LEFTCHANNEL]  * (m_vol - l)) >> 10;
-    v[RIGHTCHANNEL]= (s[RIGHTCHANNEL] * (m_vol - r)) >> 10;
+    float multl = (float) (m_vol - l) / 1024.0;
+    float multr = (float) (m_vol - r) / 1024.0;
+    v[LEFTCHANNEL]  = (uint16_t) (s[LEFTCHANNEL]  * multl);
+    v[RIGHTCHANNEL] = (uint16_t) (s[RIGHTCHANNEL] * multr);
 
     return (v[RIGHTCHANNEL] << 16) | (v[LEFTCHANNEL] & 0xffff);
 }
