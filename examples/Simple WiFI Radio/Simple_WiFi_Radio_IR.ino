@@ -1,13 +1,17 @@
+// this is the same example as Webradio_I2S.ino only with an IR remote control
+
 #include <Arduino.h>
 #include <Preferences.h>
 #include <SPI.h>
 #include <WiFi.h>
 #include "tft.h"   //see my repository at github "https://github.com/schreibfaul1/ESP32-TFT-Library-ILI9486"
 #include "Audio.h" //see my repository at github "https://github.com/schreibfaul1/ESP32-audioI2S"
+#include "IR.h"    //see my repository at github "ESP32-IR-Remote-Control"
+
 
 #define TFT_CS        22
 #define TFT_DC        21
-#define TP_CS         14 //16
+#define TP_CS         16
 #define TP_IRQ        39
 #define SPI_MOSI      23
 #define SPI_MISO      19
@@ -15,14 +19,16 @@
 #define I2S_DOUT      25
 #define I2S_BCLK      27
 #define I2S_LRC       26
+#define IR_PIN        34
 
 Preferences pref;
-TFT tft;
+TFT tft;        // @suppress("Abstract class cannot be instantiated")
 TP tp(TP_CS, TP_IRQ);
 Audio audio;
+IR ir(IR_PIN);  // do not change the objectname, it must be "ir"
 
-String ssid =     "*****";
-String password = "*****";
+String ssid =     "*********";
+String password = "*********";
 
 String stations[] ={
         "0n-80s.radionetz.de:8000/0n-70s.mp3",
@@ -109,11 +115,40 @@ void write_streamTitle(String sTitle){
     tft.setFont(Times_New_Roman43x35);
     tft.setTextColor(TFT_LIGHTBLUE);
     tft.setCursor(20, 100);
-    int l = tft.writeText((const uint8_t*) sTitle.c_str(), 100 + 150); // do not write under y=250
-    if(l < sTitle.length()){
-        // sTitle has been shortened, is too long for the display
-    }
+    tft.print(sTitle);
 }
+void volume_up(){
+    if(cur_volume < max_volume){
+        cur_volume++;
+        write_volume(cur_volume);
+        audio.setVolume(cur_volume);
+        pref.putShort("volume", cur_volume);} // store the current volume in nvs
+}
+void volume_down(){
+    if(cur_volume>0){
+        cur_volume-- ;
+        write_volume(cur_volume);
+        audio.setVolume(cur_volume);
+        pref.putShort("volume", cur_volume);} // store the current volume in nvs
+}
+void station_up(){
+    if(cur_station < max_stations-1){
+        cur_station++;
+        write_stationNr(cur_station);
+        tft.fillRect(0, 0, 480, 250, TFT_BLACK);
+        audio.connecttohost(stations[cur_station].c_str());
+        pref.putShort("station", cur_station);} // store the current station in nvs
+}
+void station_down(){
+    if(cur_station > 0){
+        cur_station--;
+        write_stationNr(cur_station);
+        tft.fillRect(0, 0, 480, 250, TFT_BLACK);
+        audio.connecttohost(stations[cur_station].c_str());
+        pref.putShort("station", cur_station);} // store the current station in nvs
+}
+
+
 //**************************************************************************************************
 //                                           S E T U P                                             *
 //**************************************************************************************************
@@ -134,18 +169,17 @@ void setup() {
         cur_station = pref.getShort("station");
         cur_volume = pref.getShort("volume");
     }
-
+    WiFi.disconnect();
     WiFi.begin(ssid.c_str(), password.c_str());
-    while (WiFi.status() != WL_CONNECTED){
-        delay(2000);
-        Serial.print(".");
-    }
-    log_i("Connect to %s", WiFi.SSID().c_str());
+    while (WiFi.status() != WL_CONNECTED) {delay(1500); Serial.print(".");}
+    log_i("Connected to %s", WiFi.SSID().c_str());
     tft.begin(TFT_CS, TFT_DC, SPI_MOSI, SPI_MISO, SPI_SCK);
+    tft.setFrequency(20000000);
     tft.setRotation(3);
     tp.setRotation(3);
     tft.setFont(Times_New_Roman43x35);
     tft.fillScreen(TFT_BLACK);
+    ir.begin();  // Init InfraredDecoder
     audio.setPinout(I2S_BCLK, I2S_LRC, I2S_DOUT);
     audio.setVolume(cur_volume); // 0...21
     audio.connecttohost(stations[cur_station].c_str());
@@ -160,6 +194,7 @@ void loop()
 {
     audio.loop();
     tp.loop();
+    ir.loop();
 }
 //**************************************************************************************************
 //                                           E V E N T S                                           *
@@ -192,33 +227,43 @@ void tp_released(){
         btn[cur_btn].s=RELEASED;
         draw_button(btn[cur_btn]);
         switch(btn[cur_btn].a){
-            case VOLUME_UP:   if(cur_volume<max_volume){
-                                cur_volume++;
-                                write_volume(cur_volume);
-                                audio.setVolume(cur_volume);
-                                pref.putShort("volume", cur_volume);} // store the current volume in nvs
-                              break;
-            case VOLUME_DOWN: if(cur_volume>0){
-                                cur_volume-- ;
-                                write_volume(cur_volume);
-                                audio.setVolume(cur_volume);
-                                pref.putShort("volume", cur_volume);} // store the current volume in nvs
-                              break;
-            case STATION_UP:  if(cur_station<max_stations-1){
-                                cur_station++;
-                                write_stationNr(cur_station);
-                                tft.fillRect(0, 0, 480, 250, TFT_BLACK);
-                                audio.connecttohost(stations[cur_station].c_str());
-                                pref.putShort("station", cur_station);} // store the current station in nvs
-                              break;
-            case STATION_DOWN:if(cur_station>0){
-                                cur_station--;
-                                write_stationNr(cur_station);
-                                tft.fillRect(0, 0, 480, 250, TFT_BLACK);
-                                audio.connecttohost(stations[cur_station].c_str());
-                                pref.putShort("station", cur_station);} // store the current station in nvs
-                              break;
+            case VOLUME_UP:    volume_up();    break;
+            case VOLUME_DOWN:  volume_down();  break;
+            case STATION_UP:   station_up();   break;
+            case STATION_DOWN: station_down(); break;
         }
     }
     cur_btn=-1;
+}
+// Events from IR Library
+void ir_res(uint32_t res){
+    if(res < max_stations){
+        cur_station = res;
+        write_stationNr(cur_station);
+        tft.fillRect(0, 0, 480, 250, TFT_BLACK);
+        audio.connecttohost(stations[cur_station].c_str());
+        pref.putShort("station", cur_station);} // store the current station in nvs
+    else{
+        tft.fillRect(0, 0, 480, 250, TFT_BLACK);
+        audio.connecttohost(stations[cur_station].c_str());
+    }
+}
+void ir_number(const char* num){
+    tft.fillRect(0, 0, 480, 250, TFT_BLACK);
+    tft.setTextSize(7);
+    tft.setTextColor(TFT_CORNSILK);
+    tft.setCursor(50, 70);
+    tft.print(num);
+}
+void ir_key(const char* key){
+    switch(key[0]){
+        case 'k':                   break; // OK
+        case 'r':   volume_up();    break; // right
+        case 'l':   volume_down();  break; // left
+        case 'u':   station_up();   break; // up
+        case 'd':   station_down(); break; // down
+        case '#':                   break; // #
+        case '*':                   break; // *
+        default:    break;
+    }
 }
