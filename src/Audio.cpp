@@ -2,7 +2,7 @@
  * Audio.cpp
  *
  *  Created on: Oct 26,2018
- *  Updated on: Feb 05,2022
+ *  Updated on: May 20,2022
  *      Author: Wolle (schreibfaul1)
  *
  */
@@ -154,7 +154,17 @@ uint32_t AudioBuffer::getReadPos() {
     return m_readPtr - m_buffer;
 }
 //---------------------------------------------------------------------------------------------------------------------
-Audio::Audio(bool internalDAC /* = false */, i2s_dac_mode_t channelEnabled /* = I2S_DAC_CHANNEL_LEFT_EN */ ) {
+Audio::Audio(bool internalDAC /* = false */, uint8_t channelEnabled /* = I2S_DAC_CHANNEL_BOTH_EN */ ) {
+
+    //    build-in-DAC works only with ESP32 (ESP32-S3 has no build-in-DAC)
+    //    build-in-DAC last working Arduino Version: 2.0.0-RC2
+    //    possible values for channelEnabled are:
+    //    I2S_DAC_CHANNEL_DISABLE  = 0,     Disable I2S built-in DAC signals
+    //    I2S_DAC_CHANNEL_RIGHT_EN = 1,     Enable I2S built-in DAC right channel, maps to DAC channel 1 on GPIO25
+    //    I2S_DAC_CHANNEL_LEFT_EN  = 2,     Enable I2S built-in DAC left  channel, maps to DAC channel 2 on GPIO26
+    //    I2S_DAC_CHANNEL_BOTH_EN  = 0x3,   Enable both of the I2S built-in DAC channels.
+    //    I2S_DAC_CHANNEL_MAX      = 0x4,   I2S built-in DAC mode max index
+
     clientsecure.setInsecure();  // if that can't be resolved update to ESP32 Arduino version 1.0.5-rc05 or higher
     m_f_channelEnabled = channelEnabled;
     m_f_internalDAC = internalDAC;
@@ -169,22 +179,30 @@ Audio::Audio(bool internalDAC /* = false */, i2s_dac_mode_t channelEnabled /* = 
     m_i2s_config.use_apll             = APLL_DISABLE; // must be disabled in V2.0.1-RC1
     m_i2s_config.tx_desc_auto_clear   = true;   // new in V1.0.1
     m_i2s_config.fixed_mclk           = I2S_PIN_NO_CHANGE;
-    if (internalDAC)  {
-        log_i("internal DAC");
-        m_i2s_config.mode             = (i2s_mode_t)(I2S_MODE_MASTER | I2S_MODE_TX | I2S_MODE_DAC_BUILT_IN );
 
-        #if ESP_ARDUINO_VERSION_MAJOR >= 2
-            m_i2s_config.communication_format = (i2s_comm_format_t)(I2S_COMM_FORMAT_STAND_I2S); // vers >= 2.0.0
-        #else
-            m_i2s_config.communication_format = (i2s_comm_format_t)(I2S_COMM_FORMAT_I2S_MSB);
+
+    if (internalDAC)  {
+
+        #ifdef CONFIG_IDF_TARGET_ESP32
+
+            log_i("internal DAC");
+            m_i2s_config.mode             = (i2s_mode_t)(I2S_MODE_MASTER | I2S_MODE_TX | I2S_MODE_DAC_BUILT_IN );
+
+            #if ESP_ARDUINO_VERSION_MAJOR >= 2
+                m_i2s_config.communication_format = (i2s_comm_format_t)(I2S_COMM_FORMAT_STAND_I2S); // vers >= 2.0.0
+            #else
+                m_i2s_config.communication_format = (i2s_comm_format_t)(I2S_COMM_FORMAT_I2S_MSB);
+            #endif
+
+            i2s_driver_install((i2s_port_t)m_i2s_num, &m_i2s_config, 0, NULL);
+            i2s_set_dac_mode((i2s_dac_mode_t)m_f_channelEnabled);
+            if(m_f_channelEnabled != I2S_DAC_CHANNEL_BOTH_EN) {
+                m_f_forceMono = true;
+            }
+
         #endif
 
-        i2s_driver_install((i2s_port_t)m_i2s_num, &m_i2s_config, 0, NULL);
-        i2s_set_dac_mode(m_f_channelEnabled);
-        if(m_f_channelEnabled != I2S_DAC_CHANNEL_BOTH_EN) {
-            m_f_forceMono = true;
-        }
-    } 
+    }
     else {
         m_i2s_config.mode             = (i2s_mode_t)(I2S_MODE_MASTER | I2S_MODE_TX);
 
@@ -211,7 +229,7 @@ Audio::Audio(bool internalDAC /* = false */, i2s_dac_mode_t channelEnabled /* = 
 //---------------------------------------------------------------------------------------------------------------------
 void Audio::setBufsize(int rambuf_sz, int psrambuf_sz) {
     if(InBuff.isInitialized()) {
-        ESP_LOGE(TAG, "Audio::setBufsize must not be called after audio is initialized");
+        log_e("Audio::setBufsize must not be called after audio is initialized");
         return;
     }
     InBuff.setBufsize(rambuf_sz, psrambuf_sz);
@@ -240,25 +258,29 @@ esp_err_t Audio::I2Sstop(uint8_t i2s_num) {
 //---------------------------------------------------------------------------------------------------------------------
 esp_err_t Audio::i2s_mclk_pin_select(const uint8_t pin) {
     if(pin != 0 && pin != 1 && pin != 3) {
-        ESP_LOGE(TAG, "Only support GPIO0/GPIO1/GPIO3, gpio_num:%d", pin);
+        log_e("Only support GPIO0/GPIO1/GPIO3, gpio_num:%d", pin);
         return ESP_ERR_INVALID_ARG;
     }
-    switch(pin){
-        case 0:
-            PIN_FUNC_SELECT(PERIPHS_IO_MUX_GPIO0_U, FUNC_GPIO0_CLK_OUT1);
-            WRITE_PERI_REG(PIN_CTRL, 0xFFF0);
-            break;
-        case 1:
-            PIN_FUNC_SELECT(PERIPHS_IO_MUX_U0TXD_U, FUNC_U0TXD_CLK_OUT3);
-            WRITE_PERI_REG(PIN_CTRL, 0xF0F0);
-            break;
-        case 3:
-            PIN_FUNC_SELECT(PERIPHS_IO_MUX_U0RXD_U, FUNC_U0RXD_CLK_OUT2);
-            WRITE_PERI_REG(PIN_CTRL, 0xFF00);
-            break;
-        default:
-            break;
-    }
+
+    #ifdef CONFIG_IDF_TARGET_ESP32
+        switch(pin){
+            case 0:
+                PIN_FUNC_SELECT(PERIPHS_IO_MUX_GPIO0_U, FUNC_GPIO0_CLK_OUT1);
+                WRITE_PERI_REG(PIN_CTRL, 0xFFF0);
+                break;
+            case 1:
+                PIN_FUNC_SELECT(PERIPHS_IO_MUX_U0TXD_U, FUNC_U0TXD_CLK_OUT3);
+                WRITE_PERI_REG(PIN_CTRL, 0xF0F0);
+                break;
+            case 3:
+                PIN_FUNC_SELECT(PERIPHS_IO_MUX_U0RXD_U, FUNC_U0RXD_CLK_OUT2);
+                WRITE_PERI_REG(PIN_CTRL, 0xFF00);
+                break;
+            default:
+                break;
+        }
+    #endif
+
     return ESP_OK;
 }
 //---------------------------------------------------------------------------------------------------------------------
@@ -387,6 +409,12 @@ void Audio::httpPrint(const char* url) {
     return;
 }
 //---------------------------------------------------------------------------------------------------------------------
+void Audio::setConnectionTimeout(uint16_t timeout_ms, uint16_t timeout_ms_ssl){
+    if(timeout_ms)     m_timeout_ms     = timeout_ms;
+    if(timeout_ms_ssl) m_timeout_ms_ssl = timeout_ms_ssl;
+}
+
+//---------------------------------------------------------------------------------------------------------------------
 bool Audio::connecttohost(const char* host, const char* user, const char* pwd) {
     // user and pwd for authentification only, can be empty
 
@@ -437,7 +465,7 @@ bool Audio::connecttohost(const char* host, const char* user, const char* pwd) {
 
     // initializationsequence
     int16_t pos_slash;                                        // position of "/" in hostname
-    int16_t pos_colon;                                        // position of "/" in hostname
+    int16_t pos_colon;                                        // position of ":" in hostname
     int16_t pos_ampersand;                                    // position of "&" in hostname
     uint16_t port = 80;                                       // port number
     m_f_webstream = true;
@@ -512,15 +540,13 @@ bool Audio::connecttohost(const char* host, const char* user, const char* pwd) {
     strcat(resp, "Authorization: Basic ");
     strcat(resp, authorization);
     strcat(resp, "\r\n");
-    strcat(resp, "User-Agent: ESP32 audioI2S\r\n");
+    strcat(resp, "User-Agent: Mozilla/5.0\r\n");
 //    strcat(resp, "Accept-Encoding: gzip;q=0\r\n");  // otherwise the server assumes gzip compression
 //    strcat(resp, "Transfer-Encoding: \r\n");  // otherwise the server assumes gzip compression
     strcat(resp, "Connection: keep-alive\r\n\r\n");
-    const uint32_t TIMEOUT_MS{250};
-    const uint32_t TIMEOUT_MS_SSL{2700};
     uint32_t t = millis();
-    if(_client->connect(hostwoext, port, m_f_ssl ? TIMEOUT_MS_SSL : TIMEOUT_MS)) {
-        _client->setNoDelay(true);
+    if(_client->connect(hostwoext, port, m_f_ssl ? m_timeout_ms_ssl : m_timeout_ms)) {
+        if(!m_f_ssl) _client->setNoDelay(true);
         // if(audio_info) audio_info("SSL/TLS Connected to server");
         _client->print(resp);
         uint32_t dt = millis() - t;
@@ -1307,6 +1333,9 @@ int Audio::read_FLAC_Header(uint8_t *data, size_t len) {
             if(offset >= 0){
                 sprintf(chbuf, "%s: %s", fn[i], data + offset + strlen(fn[i]) + 1);
                 chbuf[strlen(chbuf) - 1] = 0;
+                for(int i=0; i<strlen(chbuf);i++){
+                    if(chbuf[i] == 255) chbuf[i] = 0;
+                }
                 if(audio_id3data) audio_id3data(chbuf);
             }
         }
@@ -2053,9 +2082,17 @@ uint32_t Audio::stopSong() {
     if(m_f_running) {
         m_f_running = false;
         if(m_f_localfile){
+            m_f_localfile = false;
             pos = getFilePos() - inBufferFilled();
             audiofile.close();
+            if(audio_info) audio_info("Closing audio file");
         }
+    }
+    if(audiofile){
+        // added this before putting 'm_f_localfile = false' in stopSong(); shoulf never occur....
+        audiofile.close();
+        if(audio_info) audio_info("Closing audio file");
+        log_w("Closing audio file");  // for debug
     }
     memset(m_outBuff, 0, sizeof(m_outBuff));     //Clear OutputBuffer
     i2s_zero_dma_buffer((i2s_port_t) m_i2s_num);
@@ -2797,10 +2834,14 @@ void Audio::processLocalFile() {
         f_stream = true;
         if(audio_info) audio_info("stream ready");
         if(m_resumeFilePos){
-            setFilePos(m_resumeFilePos);
+            if(m_resumeFilePos < m_audioDataStart) m_resumeFilePos = m_audioDataStart;
+            if(m_avr_bitrate) m_audioCurrentTime = ((m_resumeFilePos - m_audioDataStart) / m_avr_bitrate) * 8;
+            audiofile.seek(m_resumeFilePos);
+            InBuff.resetBuffer();
             log_i("m_resumeFilePos %i", m_resumeFilePos);
         }
     }
+
     bytesCanBeWritten = InBuff.writeSpace();
     //----------------------------------------------------------------------------------------------------
     // some files contain further data after the audio block (e.g. pictures).
@@ -3004,6 +3045,24 @@ void Audio::processWebStream() {
 
     availableBytes = _client->available();      // available from stream
 
+    if(ARDUHAL_LOG_LEVEL >= ARDUHAL_LOG_LEVEL_DEBUG){
+        // Here you can see how much data comes in, a summary is displayed in every 10 calls
+        static uint8_t  i = 0;
+        static uint32_t t = 0;
+        static uint32_t t0 = 0;
+        static uint16_t avb[10];
+        if(!i) t = millis();
+        avb[i] = availableBytes;
+        if(!avb[i]){if(!t0) t0 = millis();}
+        else{if(t0 && (millis() - t0) > 400) log_d("\033[31m%dms no data received", millis() - t0); t0 = 0;}
+        i++;
+        if(i == 10) i = 0;
+        if(!i){
+            log_d("bytes available, 10 polls in %dms  %d, %d, %d, %d, %d, %d, %d, %d, %d, %d", millis() - t,
+                   avb[0], avb[1], avb[2], avb[3], avb[4], avb[5], avb[6], avb[7], avb[8], avb[9]);
+        }
+    }
+
     // if we have chunked data transfer: get the chunksize- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
     if(m_f_chunked && !m_chunkcount && availableBytes) { // Expecting a new chunkcount?
         int b;
@@ -3018,7 +3077,7 @@ void Audio::processWebStream() {
                 m_f_webfile = true;
                 m_f_chunked = false;
             }
-            return;        
+            return;
         }
         // We have received a hexadecimal character.  Decode it and add to the result.
         b = toupper(b) - '0';                       // Be sure we have uppercase
@@ -3771,12 +3830,20 @@ void Audio::compute_audioCurrentTime(int bd) {
             // if VBR: m_avr_bitrate is average of the first values of m_bitrate
             sum_bitrate += getBitRate();
             m_avr_bitrate = sum_bitrate / (loop_counter - 20);
+            if(loop_counter == 199 && m_resumeFilePos){
+                m_audioCurrentTime = ((getFilePos() - m_audioDataStart - inBufferFilled()) / m_avr_bitrate) * 8; // #293
+            }
         }
     }
     else {
-        if(loop_counter == 2) m_avr_bitrate = getBitRate();
+        if(loop_counter == 2){
+            m_avr_bitrate = getBitRate();
+            if(m_resumeFilePos){  // if connecttoFS() is called with resumeFilePos != 0
+                m_audioCurrentTime = ((getFilePos() - m_audioDataStart - inBufferFilled()) / m_avr_bitrate) * 8; // #293
+            }
+        }
     }
-    m_audioCurrentTime += (float) bd * 8 / m_avr_bitrate;
+    m_audioCurrentTime += ((float)bd / m_avr_bitrate) * 8;
 }
 //---------------------------------------------------------------------------------------------------------------------
 void Audio::printDecodeError(int r) {
@@ -3880,10 +3947,10 @@ uint32_t Audio::getAudioFileDuration() {
     if(m_f_localfile) {if(!audiofile) return 0;}
     if(m_f_webfile)   {if(!m_contentlength) return 0;}
 
-    if     (m_avr_bitrate && m_codec == CODEC_MP3)   m_audioFileDuration = 8 * m_audioDataSize / m_avr_bitrate;
-    else if(m_avr_bitrate && m_codec == CODEC_WAV)   m_audioFileDuration = 8 * m_audioDataSize / m_avr_bitrate;
-    else if(m_avr_bitrate && m_codec == CODEC_M4A)   m_audioFileDuration = 8 * m_audioDataSize / m_avr_bitrate;
-    else if(m_avr_bitrate && m_codec == CODEC_AAC)   m_audioFileDuration = 8 * m_audioDataSize / m_avr_bitrate;
+    if     (m_avr_bitrate && m_codec == CODEC_MP3)   m_audioFileDuration = 8 * (m_audioDataSize / m_avr_bitrate); // #289
+    else if(m_avr_bitrate && m_codec == CODEC_WAV)   m_audioFileDuration = 8 * (m_audioDataSize / m_avr_bitrate);
+    else if(m_avr_bitrate && m_codec == CODEC_M4A)   m_audioFileDuration = 8 * (m_audioDataSize / m_avr_bitrate);
+    else if(m_avr_bitrate && m_codec == CODEC_AAC)   m_audioFileDuration = 8 * (m_audioDataSize / m_avr_bitrate);
     else if(                 m_codec == CODEC_FLAC)  m_audioFileDuration = FLACGetAudioFileDuration();
     else return 0;
     return m_audioFileDuration;
@@ -3942,7 +4009,7 @@ bool Audio::setFilePos(uint32_t pos) {
     if(m_codec == CODEC_FLAC) FLACDecoderReset();
     InBuff.resetBuffer();
     if(pos < m_audioDataStart) pos = m_audioDataStart; // issue #96
-    if(m_avr_bitrate) m_audioCurrentTime = (pos-m_audioDataStart) * 8 / m_avr_bitrate; // #96
+    if(m_avr_bitrate) m_audioCurrentTime = ((pos-m_audioDataStart) / m_avr_bitrate) * 8; // #96
     return audiofile.seek(pos);
 }
 //---------------------------------------------------------------------------------------------------------------------
@@ -3998,44 +4065,6 @@ uint32_t Audio::getBitRate(bool avg){
     if (avg)
         return m_avr_bitrate;
     return m_bitRate;
-}
-//---------------------------------------------------------------------------------------------------------------------
-[[deprecated]]void Audio::setInternalDAC(bool internalDAC /* = true */, i2s_dac_mode_t channelEnabled /* = I2S_DAC_CHANNEL_LEFT_EN */  ) {
-// is deprecated, set internal DAC in constructor e.g. Audio audio(true, I2S_DAC_CHANNEL_BOTH_EN);
-    m_f_channelEnabled = channelEnabled;
-    m_f_internalDAC = internalDAC;
-    i2s_driver_uninstall((i2s_port_t)m_i2s_num);
-    if (internalDAC)  {
-        log_i("internal DAC");
-        m_i2s_config.mode                 = (i2s_mode_t)(I2S_MODE_MASTER | I2S_MODE_TX | I2S_MODE_DAC_BUILT_IN );
-
-        #if ESP_ARDUINO_VERSION_MAJOR >= 2
-            m_i2s_config.communication_format = (i2s_comm_format_t)(I2S_COMM_FORMAT_STAND_I2S); // vers >= 2.0.0
-        #else
-            m_i2s_config.communication_format = (i2s_comm_format_t)(I2S_COMM_FORMAT_I2S_MSB);
-        #endif
-
-        i2s_driver_install((i2s_port_t) m_i2s_num, &m_i2s_config, 0, NULL);
-        // enable the DAC channels
-        i2s_set_dac_mode(m_f_channelEnabled);
-        if(m_f_channelEnabled != I2S_DAC_CHANNEL_BOTH_EN) {
-            m_f_forceMono = true;
-        }
-    }
-    else {  // external DAC
-        m_i2s_config.mode                 = (i2s_mode_t)(I2S_MODE_MASTER | I2S_MODE_TX);
-
-        #if ESP_ARDUINO_VERSION_MAJOR >= 2
-            m_i2s_config.communication_format = (i2s_comm_format_t)(I2S_COMM_FORMAT_STAND_I2S); // vers >= 2.0.0
-        #else
-            m_i2s_config.communication_format = (i2s_comm_format_t)(I2S_COMM_FORMAT_I2S | I2S_COMM_FORMAT_I2S_MSB);
-        #endif
-
-        i2s_driver_install  ((i2s_port_t)m_i2s_num, &m_i2s_config, 0, NULL);
-        i2s_set_pin((i2s_port_t) m_i2s_num, &m_pin_config);
-    }
-    // clear the DMA buffers
-    i2s_zero_dma_buffer((i2s_port_t) m_i2s_num);
 }
 //---------------------------------------------------------------------------------------------------------------------
 void Audio::setI2SCommFMT_LSB(bool commFMT) {
@@ -4112,9 +4141,9 @@ void Audio::setTone(int8_t gainLowPass, int8_t gainBandPass, int8_t gainHighPass
 
     IIR_calculateCoefficients(m_gain0, m_gain1, m_gain2);
 
-    /* 
+    /*
         This will cause a clicking sound when adjusting the EQ.
-        Because when the EQ is adjusted, the IIR filter will be cleared and played, 
+        Because when the EQ is adjusted, the IIR filter will be cleared and played,
         mixed in the audio data frame, and a click-like sound will be produced.
     */
     /*
@@ -4194,11 +4223,11 @@ void Audio::IIR_calculateCoefficients(int8_t G0, int8_t G1, int8_t G2){  // Infi
 
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 
-    if(G0 < -40) G0 = -40;      // -40dB -> Vin*0.01  
+    if(G0 < -40) G0 = -40;      // -40dB -> Vin*0.01
     if(G0 > 6) G0 = 6;          // +6dB -> Vin*2
     if(G1 < -40) G1 = -40;
     if(G1 > 6) G1 = 6;
-    if(G2 < -40) G2 = -40; 
+    if(G2 < -40) G2 = -40;
     if(G2 > 6) G2 = 6;
 
     const float FcLS   =  500;  // Frequency LowShelf[Hz]

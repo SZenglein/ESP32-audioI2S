@@ -2,7 +2,7 @@
  * Audio.h
  *
  *  Created on: Oct 26,2018
- *  Updated on: Feb 19,2022
+ *  Updated on: May 19,2022
  *      Author: Wolle (schreibfaul1)
  */
 
@@ -32,7 +32,8 @@
 
 
 #ifdef SDFATFS_USED
-typedef File32 File;
+//typedef File32 File;
+typedef FsFile File;
 
 namespace fs {
     class FS : public SdFat {
@@ -154,7 +155,7 @@ class Audio : private AudioBuffer{
     AudioBuffer InBuff; // instance of input buffer
 
 public:
-    Audio(bool internalDAC = false, i2s_dac_mode_t channelEnabled = I2S_DAC_CHANNEL_LEFT_EN); // #99
+    Audio(bool internalDAC = false, uint8_t channelEnabled = 3); // #99
     ~Audio();
     void setBufsize(int rambuf_sz, int psrambuf_sz);
     bool connecttohost(const char* host, const char* user = "", const char* pwd = "");
@@ -162,6 +163,7 @@ public:
     bool connecttoFS(fs::FS &fs, const char* path, uint32_t resumeFilePos = 0);
     bool connecttoSD(const char* path, uint32_t resumeFilePos = 0);
     bool setFileLoop(bool input);//TEST loop
+    void setConnectionTimeout(uint16_t timeout_ms, uint16_t timeout_ms_ssl);
     bool setAudioPlayPosition(uint16_t sec);
     bool setFilePos(uint32_t pos);
     bool audioFileSeek(const float speed);
@@ -191,7 +193,6 @@ public:
     uint32_t inBufferFilled(); // returns the number of stored bytes in the inputbuffer
     uint32_t inBufferFree();   // returns the number of free bytes in the inputbuffer
     void setTone(int8_t gainLowPass, int8_t gainBandPass, int8_t gainHighPass);
-    [[deprecated]]void setInternalDAC(bool internalDAC = true, i2s_dac_mode_t channelEnabled = I2S_DAC_CHANNEL_LEFT_EN);
     void setI2SCommFMT_LSB(bool commFMT);
     int getCodec() {return m_codec;}
     const char *getCodecname() {return codecname[m_codec];}
@@ -435,6 +436,8 @@ private:
     uint16_t        m_datamode = 0;                 // Statemaschine
     uint16_t        m_streamTitleHash = 0;          // remember streamtitle, ignore multiple occurence in metadata
     uint16_t        m_streamUrlHash = 0;            // remember streamURL, ignore multiple occurence in metadata
+    uint16_t        m_timeout_ms = 250;
+    uint16_t        m_timeout_ms_ssl = 2700;
     uint8_t         m_flacBitsPerSample = 0;        // bps should be 16
     uint8_t         m_flacNumChannels = 0;          // can be read out in the FLAC file header
     uint32_t        m_flacSampleRate = 0;           // can be read out in the FLAC file header
@@ -469,7 +472,7 @@ private:
     bool            m_f_m3u8data = false;           // used in processM3U8entries
     bool            m_f_Log = true;                 // if m3u8: log is cancelled
     bool            m_f_continue = false;           // next m3u8 chunk is available
-    i2s_dac_mode_t  m_f_channelEnabled = I2S_DAC_CHANNEL_LEFT_EN;  // internal DAC on GPIO26 for M5StickC/Plus
+    uint8_t         m_f_channelEnabled = 3;         // internal DAC, both channels
     uint32_t        m_audioFileDuration = 0;
     float           m_audioCurrentTime = 0;
     uint32_t        m_audioDataStart = 0;           // in bytes
